@@ -88,20 +88,20 @@ SELECT * FROM current_employee_access;
 
 -- Check recent swipe activity
 SELECT 
-    ep.comp_id,
-    ep.first_name || ' ' || ep.last_name as employee_name,
-    r.name as reader_name,
-    l.name as location,
-    datetime(s.swipe_time) as swipe_time,
-    CASE s.access_granted 
+    "employee_profiles"."comp_id",
+    "employee_profiles"."first_name" || ' ' || "employee_profiles"."last_name" AS "employee_name",
+    "readers"."name" AS "reader_name",
+    "locations"."name" AS "location",
+    datetime("swipes"."swipe_time") AS "swipe_time",
+    CASE "swipes"."access_granted" 
         WHEN 1 THEN 'GRANTED' 
         ELSE 'DENIED' 
-    END as access_status
-FROM swipes s
-JOIN employee_profiles ep ON s.employee_id = ep.id
-JOIN readers r ON s.reader_id = r.id
-JOIN locations l ON r.location_id = l.id
-ORDER BY s.swipe_time DESC
+    END AS "access_status"
+FROM "swipes"
+JOIN "employee_profiles" ON "swipes"."employee_id" = "employee_profiles"."id"
+JOIN "readers" ON "swipes"."reader_id" = "readers"."id"
+JOIN "locations" ON "readers"."location_id" = "locations"."id"
+ORDER BY "swipes"."swipe_time" DESC
 LIMIT 10;
 ```
 
@@ -123,42 +123,85 @@ AccessControl-SQLite_Project/
 
 ## 🔍 Key Queries and Reports
 
-### Employee Access Audit
+### Employee Access Overview
 ```sql
--- Get comprehensive employee access report
-SELECT * FROM current_employee_access 
-WHERE total_access_profiles > 0
-ORDER BY department, employee_name;
-```
+-- View all active employees and their access profiles
+SELECT * FROM current_employee_access;
 
-### Security Monitoring
-```sql
--- Find employees with failed access attempts
-SELECT DISTINCT
-    ep.comp_id,
-    ep.first_name || ' ' || ep.last_name as employee_name,
-    COUNT(*) as failed_attempts
-FROM swipes s
-JOIN employee_profiles ep ON s.employee_id = ep.id
-WHERE s.access_granted = 0
-  AND date(s.swipe_time) = date('now')
-GROUP BY ep.id, ep.comp_id, employee_name
-HAVING failed_attempts > 3;
-```
-
-### Access Pattern Analysis
-```sql
--- Analyze peak access times by location
+-- List employees by department
 SELECT 
-    l.name as location,
-    strftime('%H', s.swipe_time) as hour,
-    COUNT(*) as swipe_count
-FROM swipes s
-JOIN readers r ON s.reader_id = r.id
-JOIN locations l ON r.location_id = l.id
-WHERE date(s.swipe_time) >= date('now', '-7 days')
-GROUP BY l.name, hour
-ORDER BY l.name, hour;
+    "departments"."name" AS "department",
+    "employee_profiles"."comp_id",
+    "employee_profiles"."first_name" || ' ' || "employee_profiles"."last_name" AS "employee_name",
+    "locations"."name" AS "location"
+FROM "employee_profiles"
+JOIN "departments" ON "employee_profiles"."department_id" = "departments"."id"
+JOIN "locations" ON "employee_profiles"."location_id" = "locations"."id"
+WHERE "employee_profiles"."expire_date" > CAST(strftime('%Y%m%d', 'now') AS INTEGER)
+ORDER BY "departments"."name", "employee_profiles"."last_name";
+```
+
+### Access Control Monitoring
+```sql
+-- Recent access attempts (last 24 hours)
+SELECT 
+    "employee_profiles"."comp_id",
+    "employee_profiles"."first_name" || ' ' || "employee_profiles"."last_name" AS "employee_name",
+    "readers"."name" AS "reader",
+    "locations"."name" AS "location",
+    "swipes"."swipe_time",
+    CASE "swipes"."access_granted" WHEN 1 THEN 'GRANTED' ELSE 'DENIED' END AS "result"
+FROM "swipes"
+JOIN "employee_profiles" ON "swipes"."employee_id" = "employee_profiles"."id"
+JOIN "readers" ON "swipes"."reader_id" = "readers"."id"
+JOIN "locations" ON "readers"."location_id" = "locations"."id"
+WHERE "swipes"."swipe_time" >= datetime('now', '-1 day')
+ORDER BY "swipes"."swipe_time" DESC;
+
+-- Failed access attempts today
+SELECT 
+    "employee_profiles"."comp_id",
+    "employee_profiles"."first_name" || ' ' || "employee_profiles"."last_name" AS "employee_name",
+    "readers"."name" AS "reader",
+    COUNT(*) AS "failed_attempts"
+FROM "swipes"
+JOIN "employee_profiles" ON "swipes"."employee_id" = "employee_profiles"."id"
+JOIN "readers" ON "swipes"."reader_id" = "readers"."id"
+WHERE "swipes"."access_granted" = 0 
+  AND date("swipes"."swipe_time") = date('now')
+GROUP BY "employee_profiles"."id", "readers"."id"
+ORDER BY "failed_attempts" DESC;
+```
+
+### Advanced Reports
+
+#### Individual Employee Audit (from comp_id_audit.sql)
+For detailed audit of specific employee (e.g., 'JS100004') - see `comp_id_audit.sql` for complete query
+
+#### Attendance Analysis (from first_last_swipe.sql)  
+For shift analysis and working hours calculation - see `first_last_swipe.sql` for complete query
+
+### Administrative Queries
+```sql
+-- List all readers by location
+SELECT 
+    "locations"."name" AS "location",
+    "readers"."name" AS "reader_name"
+FROM "readers"
+JOIN "locations" ON "readers"."location_id" = "locations"."id"
+ORDER BY "locations"."name", "readers"."name";
+
+-- Access profiles and their assigned readers
+SELECT 
+    "access"."name" AS "access_profile",
+    "locations"."name" AS "location",
+    GROUP_CONCAT("readers"."name", ', ') AS "readers"
+FROM "access"
+JOIN "access_readers" ON "access"."id" = "access_readers"."access_id"
+JOIN "readers" ON "access_readers"."reader_id" = "readers"."id"
+JOIN "locations" ON "access"."location_id" = "locations"."id"
+GROUP BY "access"."id"
+ORDER BY "locations"."name", "access"."name";
 ```
 
 ## 🛠️ Database Optimizations
